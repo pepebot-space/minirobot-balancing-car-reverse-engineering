@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MiniRobot Controller</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .joystick-container {
+            touch-action: none;
+        }
+        .btn-control {
+            transition: all 0.15s ease;
+        }
+        .btn-control:active {
+            transform: scale(0.95);
+        }
+        .status-dot {
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen">
+    <div class="container mx-auto px-4 py-8 max-w-4xl">
+        <!-- Header -->
+        <header class="text-center mb-8">
+            <h1 class="text-3xl font-bold text-blue-400 mb-2">MiniRobot Controller</h1>
+            <p class="text-gray-400">BLE Balancing Car Remote Control</p>
+        </header>
+
+        <!-- Connection Status -->
+        <div class="bg-gray-800 rounded-lg p-4 mb-6">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                    <div id="statusDot" class="w-3 h-3 rounded-full bg-red-500 status-dot"></div>
+                    <span id="connectionStatus" class="text-gray-300">Disconnected</span>
+                </div>
+                <div class="text-sm text-gray-400">
+                    <span id="deviceName">-</span>
+                    <span id="deviceAddress" class="ml-2 font-mono"></span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Connection Panel -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+            <div class="bg-gray-800 rounded-lg p-4">
+                <h2 class="text-lg font-semibold mb-3 text-blue-300">Connection</h2>
+                <div class="space-y-3">
+                    <div>
+                        <label class="block text-sm text-gray-400 mb-1">Device Address</label>
+                        <input type="text" id="inputAddress" placeholder="CB:F4:C1:BF:F4:79"
+                            class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white focus:border-blue-500 focus:outline-none">
+                    </div>
+                    <div class="flex gap-2">
+                        <button onclick="scanDevices()" class="btn-control flex-1 bg-blue-600 hover:bg-blue-700 py-2 rounded font-medium">
+                            Scan
+                        </button>
+                        <button onclick="connectDevice()" id="btnConnect" class="btn-control flex-1 bg-green-600 hover:bg-green-700 py-2 rounded font-medium">
+                            Connect
+                        </button>
+                        <button onclick="disconnectDevice()" id="btnDisconnect" class="btn-control flex-1 bg-red-600 hover:bg-red-700 py-2 rounded font-medium" disabled>
+                            Disconnect
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Device List -->
+            <div class="bg-gray-800 rounded-lg p-4">
+                <h2 class="text-lg font-semibold mb-3 text-blue-300">Found Devices</h2>
+                <div id="deviceList" class="space-y-2 max-h-40 overflow-y-auto">
+                    <p class="text-gray-500 text-sm">Click Scan to find devices</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Movement Controls -->
+        <div class="bg-gray-800 rounded-lg p-4 mb-6">
+            <h2 class="text-lg font-semibold mb-4 text-blue-300">Movement Control</h2>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <!-- Direction Pad -->
+                <div class="flex flex-col items-center">
+                    <div class="grid grid-cols-3 gap-2 mb-4">
+                        <div></div>
+                        <button onmousedown="startMove('forward')" onmouseup="stopMove()" onmouseleave="stopMove()"
+                            ontouchstart="startMove('forward')" ontouchend="stopMove()"
+                            class="btn-control w-16 h-16 bg-blue-600 hover:bg-blue-500 rounded-lg text-2xl">
+                            ↑
+                        </button>
+                        <div></div>
+                        <button onmousedown="startMove('left')" onmouseup="stopMove()" onmouseleave="stopMove()"
+                            ontouchstart="startMove('left')" ontouchend="stopMove()"
+                            class="btn-control w-16 h-16 bg-blue-600 hover:bg-blue-500 rounded-lg text-2xl">
+                            ←
+                        </button>
+                        <button onclick="stopMoveNow()"
+                            class="btn-control w-16 h-16 bg-red-600 hover:bg-red-500 rounded-lg text-sm font-bold">
+                            STOP
+                        </button>
+                        <button onmousedown="startMove('right')" onmouseup="stopMove()" onmouseleave="stopMove()"
+                            ontouchstart="startMove('right')" ontouchend="stopMove()"
+                            class="btn-control w-16 h-16 bg-blue-600 hover:bg-blue-500 rounded-lg text-2xl">
+                            →
+                        </button>
+                        <div></div>
+                        <button onmousedown="startMove('backward')" onmouseup="stopMove()" onmouseleave="stopMove()"
+                            ontouchstart="startMove('backward')" ontouchend="stopMove()"
+                            class="btn-control w-16 h-16 bg-blue-600 hover:bg-blue-500 rounded-lg text-2xl">
+                            ↓
+                        </button>
+                        <div></div>
+                    </div>
+                    
+                    <div class="flex items-center gap-2">
+                        <label class="text-sm text-gray-400">Power:</label>
+                        <input type="range" id="powerSlider" min="1000" max="20000" value="9000" class="w-32">
+                        <span id="powerValue" class="text-sm font-mono w-12">9000</span>
+                    </div>
+                </div>
+
+                <!-- Joystick Panel -->
+                <div>
+                    <div class="joystick-container w-48 h-48 mx-auto bg-gray-700 rounded-full relative border-4 border-gray-600"
+                        id="joystickArea">
+                        <div id="joystickKnob" class="w-12 h-12 bg-blue-500 rounded-full absolute cursor-pointer"
+                            style="top: 50%; left: 50%; transform: translate(-50%, -50%);">
+                        </div>
+                    </div>
+                    <div class="text-center mt-2">
+                        <span class="text-sm text-gray-400">X: <span id="joyX" class="font-mono">0</span></span>
+                        <span class="text-sm text-gray-400 ml-4">Y: <span id="joyY" class="font-mono">0</span></span>
+                    </div>
+                    <div class="text-center mt-2">
+                        <button onclick="sendJoystick()" class="btn-control bg-green-600 hover:bg-green-700 px-4 py-2 rounded text-sm">
+                            Send
+                        </button>
+                        <button onclick="centerJoystick()" class="btn-control bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded text-sm ml-2">
+                            Center
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="mt-4">
+                <label class="text-sm text-gray-400">Duration (seconds):</label>
+                <input type="number" id="durationInput" value="1.5" step="0.1" min="0.2" max="60"
+                    class="ml-2 w-24 bg-gray-700 border border-gray-600 rounded px-2 py-1 text-white">
+            </div>
+        </div>
+
+        <!-- Light Controls -->
+        <div class="bg-gray-800 rounded-lg p-4 mb-6">
+            <h2 class="text-lg font-semibold mb-4 text-blue-300">Light Control</h2>
+            <div class="grid grid-cols-2 md:grid-cols-3 gap-3">
+                <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" id="chkHeadlight" class="w-4 h-4">
+                    <span class="text-sm">Headlight</span>
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" id="chkBrakelight" class="w-4 h-4">
+                    <span class="text-sm">Brakelight</span>
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" id="chkCarlight" class="w-4 h-4">
+                    <span class="text-sm">Carlight</span>
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" id="chkLockShutdown" class="w-4 h-4">
+                    <span class="text-sm">Lock Shutdown</span>
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" id="chkLockWarn" class="w-4 h-4">
+                    <span class="text-sm">Lock Warn</span>
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" id="chkBackAlarm" class="w-4 h-4">
+                    <span class="text-sm">Back Alarm</span>
+                </label>
+            </div>
+            <button onclick="setLights()" class="mt-4 btn-control bg-yellow-600 hover:bg-yellow-700 px-4 py-2 rounded">
+                Apply Lights
+            </button>
+        </div>
+
+        <!-- Register Control -->
+        <div class="bg-gray-800 rounded-lg p-4 mb-6">
+            <h2 class="text-lg font-semibold mb-4 text-blue-300">Register Write</h2>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <select id="selectRegister" class="bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white">
+                    <option value="limit">limit (0x72)</option>
+                    <option value="lock">lock (0x70)</option>
+                    <option value="lock2">lock2 (0x71)</option>
+                    <option value="normal_speed">normal_speed (0x73)</option>
+                    <option value="train_speed">train_speed (0x74)</option>
+                    <option value="max_speed">max_speed (0x7D)</option>
+                    <option value="turn_scale">turn_scale (0xA1)</option>
+                    <option value="riding_scale">riding_scale (0xA2)</option>
+                    <option value="power_balance">power_balance (0xA3)</option>
+                    <option value="riding_balance">riding_balance (0xFC)</option>
+                    <option value="light_flags">light_flags (0xD3)</option>
+                </select>
+                <input type="number" id="inputRegisterValue" placeholder="Value" value="0"
+                    class="bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white">
+                <button onclick="writeRegister()" class="btn-control bg-purple-600 hover:bg-purple-700 rounded">
+                    Write Register
+                </button>
+            </div>
+        </div>
+
+        <!-- Raw Command -->
+        <div class="bg-gray-800 rounded-lg p-4 mb-6">
+            <h2 class="text-lg font-semibold mb-4 text-blue-300">Raw Command (Hex)</h2>
+            <div class="flex gap-3">
+                <input type="text" id="inputRawHex" placeholder="55AA040A037201007BFF"
+                    class="flex-1 bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white font-mono">
+                <button onclick="sendRaw()" class="btn-control bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded">
+                    Send
+                </button>
+            </div>
+        </div>
+
+        <!-- Logs -->
+        <div class="bg-gray-800 rounded-lg p-4">
+            <h2 class="text-lg font-semibold mb-3 text-blue-300">Log</h2>
+            <div id="logArea" class="bg-gray-900 rounded p-3 h-40 overflow-y-auto font-mono text-xs">
+                <div class="text-gray-500">Ready...</div>
+            </div>
+            <button onclick="clearLog()" class="mt-2 btn-control bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded text-sm">
+                Clear Log
+            </button>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = '';
+
+        let isConnected = false;
+        let moveTimeout = null;
+        let joystickActive = false;
+        let joyX = 0;
+        let joyY = 0;
+
+        // Power slider
+        document.getElementById('powerSlider').addEventListener('input', (e) => {
+            document.getElementById('powerValue').textContent = e.target.value;
+        });
+
+        // Joystick handling
+        const joystickArea = document.getElementById('joystickArea');
+        const joystickKnob = document.getElementById('joystickKnob');
+
+        function getJoystickPos(e, rect) {
+            let clientX, clientY;
+            if (e.touches) {
+                clientX = e.touches[0].clientX;
+                clientY = e.touches[0].clientY;
+            } else {
+                clientX = e.clientX;
+                clientY = e.clientY;
+            }
+            const x = clientX - rect.left - rect.width / 2;
+            const y = clientY - rect.top - rect.height / 2;
+            const maxDist = rect.width / 2 - 24;
+            const dist = Math.min(Math.sqrt(x * x + y * y), maxDist);
+            const angle = Math.atan2(y, x);
+            return {
+                x: Math.round((Math.cos(angle) * dist / maxDist) * 32767),
+                y: Math.round((Math.sin(angle) * dist / maxDist) * 32767)
+            };
+        }
+
+        function updateJoystickPos(x, y) {
+            const rect = joystickArea.getBoundingClientRect();
+            const maxDist = rect.width / 2 - 24;
+            const dist = Math.min(Math.sqrt(x * x + y * y), maxDist);
+            const angle = Math.atan2(y, x);
+            const percX = Math.cos(angle) * dist;
+            const percY = Math.sin(angle) * dist;
+            joystickKnob.style.left = `calc(50% + ${percX}px)`;
+            joystickKnob.style.top = `calc(50% + ${percY}px)`;
+        }
+
+        function handleJoystickMove(e) {
+            if (!joystickActive) return;
+            e.preventDefault();
+            const rect = joystickArea.getBoundingClientRect();
+            const pos = getJoystickPos(e, rect);
+            joyX = pos.x;
+            joyY = pos.y;
+            document.getElementById('joyX').textContent = joyX;
+            document.getElementById('joyY').textContent = joyY;
+            updateJoystickPos(joyX, joyY);
+        }
+
+        joystickArea.addEventListener('mousedown', (e) => {
+            joystickActive = true;
+            handleJoystickMove(e);
+        });
+        joystickArea.addEventListener('touchstart', (e) => {
+            joystickActive = true;
+            handleJoystickMove(e);
+        });
+        document.addEventListener('mousemove', handleJoystickMove);
+        document.addEventListener('touchmove', handleJoystickMove);
+        document.addEventListener('mouseup', () => { joystickActive = false; });
+        document.addEventListener('touchend', () => { joystickActive = false; });
+
+        function centerJoystick() {
+            joyX = 0;
+            joyY = 0;
+            document.getElementById('joyX').textContent = '0';
+            document.getElementById('joyY').textContent = '0';
+            joystickKnob.style.left = '50%';
+            joystickKnob.style.top = '50%';
+        }
+
+        // API functions
+        async function api(endpoint, method = 'GET', body = null) {
+            const options = {
+                method,
+                headers: { 'Content-Type': 'application/json' }
+            };
+            if (body) options.body = JSON.stringify(body);
+            const response = await fetch(API_URL + '/api' + endpoint, options);
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.detail || 'Request failed');
+            }
+            return response.json();
+        }
+
+        function log(message, type = 'info') {
+            const logArea = document.getElementById('logArea');
+            const time = new Date().toLocaleTimeString();
+            const colors = {
+                info: 'text-gray-300',
+                success: 'text-green-400',
+                error: 'text-red-400',
+                warn: 'text-yellow-400'
+            };
+            const div = document.createElement('div');
+            div.className = colors[type] || colors.info;
+            div.textContent = `[${time}] ${message}`;
+            logArea.appendChild(div);
+            logArea.scrollTop = logArea.scrollHeight;
+        }
+
+        function clearLog() {
+            document.getElementById('logArea').innerHTML = '<div class="text-gray-500">Log cleared...</div>';
+        }
+
+        function updateConnectionUI(connected, name = '', address = '') {
+            isConnected = connected;
+            const statusDot = document.getElementById('statusDot');
+            const statusText = document.getElementById('connectionStatus');
+            const btnConnect = document.getElementById('btnConnect');
+            const btnDisconnect = document.getElementById('btnDisconnect');
+            document.getElementById('deviceName').textContent = name || '-';
+            document.getElementById('deviceAddress').textContent = address;
+
+            if (connected) {
+                statusDot.className = 'w-3 h-3 rounded-full bg-green-500 status-dot';
+                statusText.textContent = 'Connected';
+                btnConnect.disabled = true;
+                btnDisconnect.disabled = false;
+                startStatusPoll();
+            } else {
+                statusDot.className = 'w-3 h-3 rounded-full bg-red-500 status-dot';
+                statusText.textContent = 'Disconnected';
+                btnConnect.disabled = false;
+                btnDisconnect.disabled = true;
+                stopStatusPoll();
+            }
+        }
+
+        async function scanDevices() {
+            log('Scanning for devices...');
+            try {
+                const result = await api('/scan?timeout=8');
+                const list = document.getElementById('deviceList');
+                if (result.devices.length === 0) {
+                    list.innerHTML = '<p class="text-gray-500 text-sm">No devices found</p>';
+                    log('No devices found', 'warn');
+                } else {
+                    list.innerHTML = '';
+                    result.devices.forEach(d => {
+                        const div = document.createElement('div');
+                        div.className = 'bg-gray-700 rounded p-2 cursor-pointer hover:bg-gray-600';
+                        div.innerHTML = `<div class="font-medium">${d.name}</div><div class="text-xs font-mono text-gray-400">${d.address}</div>`;
+                        div.onclick = () => {
+                            document.getElementById('inputAddress').value = d.address;
+                            log(`Selected: ${d.name} (${d.address})`);
+                        };
+                        list.appendChild(div);
+                    });
+                    log(`Found ${result.devices.length} device(s)`, 'success');
+                }
+            } catch (e) {
+                log('Scan failed: ' + e.message, 'error');
+            }
+        }
+
+        async function connectDevice() {
+            const address = document.getElementById('inputAddress').value.trim();
+            if (!address) {
+                log('Please enter device address or scan first', 'warn');
+                return;
+            }
+            log(`Connecting to ${address}...`);
+            try {
+                const result = await api('/connect', 'POST', { address });
+                updateConnectionUI(true, result.name, result.address);
+                log(`Connected to ${result.name}`, 'success');
+            } catch (e) {
+                log('Connection failed: ' + e.message, 'error');
+            }
+        }
+
+        async function disconnectDevice() {
+            log('Disconnecting...');
+            try {
+                await api('/disconnect', 'POST');
+                updateConnectionUI(false);
+                log('Disconnected', 'success');
+            } catch (e) {
+                log('Disconnect failed: ' + e.message, 'error');
+            }
+        }
+
+        async function sendMove(action) {
+            if (!isConnected) {
+                log('Not connected', 'error');
+                return;
+            }
+            const power = parseInt(document.getElementById('powerSlider').value);
+            const duration = parseFloat(document.getElementById('durationInput').value);
+            try {
+                await api('/move', 'POST', { action, power, duration });
+                log(`Move: ${action} (power=${power}, duration=${duration})`, 'success');
+            } catch (e) {
+                log('Move failed: ' + e.message, 'error');
+            }
+        }
+
+        function startMove(action) {
+            sendMove(action);
+        }
+
+        function stopMove() {
+            if (moveTimeout) {
+                clearTimeout(moveTimeout);
+                moveTimeout = null;
+            }
+        }
+
+        function stopMoveNow() {
+            sendMove('stop');
+        }
+
+        async function sendJoystick() {
+            if (!isConnected) {
+                log('Not connected', 'error');
+                return;
+            }
+            const duration = parseFloat(document.getElementById('durationInput').value);
+            try {
+                await api('/joystick', 'POST', { x: joyX, y: joyY, duration });
+                log(`Joystick: x=${joyX}, y=${joyY}`, 'success');
+            } catch (e) {
+                log('Joystick failed: ' + e.message, 'error');
+            }
+        }
+
+        async function setLights() {
+            if (!isConnected) {
+                log('Not connected', 'error');
+                return;
+            }
+            const body = {
+                headlight: document.getElementById('chkHeadlight').checked,
+                brakelight: document.getElementById('chkBrakelight').checked,
+                carlight: document.getElementById('chkCarlight').checked,
+                lock_shutdown: document.getElementById('chkLockShutdown').checked,
+                lock_warn: document.getElementById('chkLockWarn').checked,
+                back_alarm: document.getElementById('chkBackAlarm').checked
+            };
+            try {
+                await api('/light', 'POST', body);
+                log('Lights updated', 'success');
+            } catch (e) {
+                log('Light failed: ' + e.message, 'error');
+            }
+        }
+
+        async function writeRegister() {
+            if (!isConnected) {
+                log('Not connected', 'error');
+                return;
+            }
+            const reg = document.getElementById('selectRegister').value;
+            const value = parseInt(document.getElementById('inputRegisterValue').value);
+            try {
+                await api('/write', 'POST', { reg, value });
+                log(`Write register: ${reg}=${value}`, 'success');
+            } catch (e) {
+                log('Write failed: ' + e.message, 'error');
+            }
+        }
+
+        async function sendRaw() {
+            if (!isConnected) {
+                log('Not connected', 'error');
+                return;
+            }
+            const hex = document.getElementById('inputRawHex').value.trim();
+            if (!hex) {
+                log('Please enter hex data', 'warn');
+                return;
+            }
+            try {
+                await api('/raw', 'POST', { hex });
+                log(`Sent raw: ${hex}`, 'success');
+            } catch (e) {
+                log('Raw send failed: ' + e.message, 'error');
+            }
+        }
+
+        // Status polling - only when connected
+let statusPollInterval = null;
+        function startStatusPoll() {
+            if (statusPollInterval) return;
+            statusPollInterval = setInterval(async () => {
+                if (!isConnected) {
+                    stopStatusPoll();
+                    return;
+                }
+                try {
+                    const status = await api('/status');
+                    if (status.connected === 'false' && isConnected) {
+                        updateConnectionUI(false);
+                        log('Robot disconnected', 'warn');
+                    }
+                } catch (e) {
+                    updateConnectionUI(false);
+                    log('Connection lost', 'error');
+                }
+            }, 3000);
+        }
+
+        function stopStatusPoll() {
+            if (statusPollInterval) {
+                clearInterval(statusPollInterval);
+                statusPollInterval = null;
+            }
+        }
+    </script>
+</body>
+</html>

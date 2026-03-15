@@ -1,0 +1,58 @@
+[tool.poetry]
+name = "minirobot-ble-control"
+version = "1.0.0"
+description = "MiniRobot Balancing Car BLE Controller - Reverse Engineering Toolkit"
+authors = ["MiniRobot RE Team"]
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/anomalyco/minirobot-balancing-car-reverse-engineering"
+keywords = ["ble", "bluetooth", "robot", "balancing-car", "control"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Topic :: System :: Hardware :: Hardware Drivers",
+    "Topic :: Scientific/Engineering :: Robotics",
+]
+
+[tool.poetry.dependencies]
+python = "^3.9"
+bleak = ">=0.21.0"
+fastapi = {version = ">=0.100.0", optional = true}
+uvicorn = {version = ">=0.23.0", extras = ["standard"], optional = true}
+pydantic = {version = ">=2.0.0", optional = true}
+
+[tool.poetry.group.dev.dependencies]
+pytest = ">=7.0.0"
+pytest-asyncio = ">=0.21.0"
+ruff = ">=0.1.0"
+mypy = ">=1.0.0"
+
+[tool.poetry.extras]
+web = ["fastapi", "uvicorn", "pydantic"]
+
+[tool.poetry.scripts]
+minirobot-ble = "minirobot_ble_control:main"
+minirobot-web = "minirobot_web_api:main"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "C4"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
