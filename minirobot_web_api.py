@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import asyncio
 import time
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
@@ -55,6 +55,68 @@ def maybe_xor(data: bytes, key: str) -> bytes:
         return data
     b = 0x55 if key == "55" else 0xD8
     return bytes((x ^ b) for x in data)
+
+
+def parse_one_frame(data: bytes) -> Optional[tuple[int, int, int, bytes]]:
+    if len(data) < 8 or data[0] != 0x55 or data[1] != 0xAA:
+        return None
+    total = data[2] + 6
+    if total > len(data):
+        return None
+    frame = data[:total]
+    checksum = ((frame[-1] << 8) | frame[-2]) & 0xFFFF
+    calc = (~sum(frame[2:-2])) & 0xFFFF
+    if checksum != calc:
+        return None
+    payload_len = frame[2] - 2
+    payload = frame[6 : 6 + payload_len]
+    return frame[3], frame[4], frame[5], payload
+
+
+def decode_frame_any(data: bytes) -> Optional[tuple[int, int, int, bytes, str]]:
+    for mode, key in (("none", None), ("55", 0x55), ("d8", 0xD8)):
+        probe = data if key is None else bytes((b ^ key) for b in data)
+        parsed = parse_one_frame(probe)
+        if parsed is not None:
+            cmd, typ, addr, payload = parsed
+            return cmd, typ, addr, payload, mode
+    return None
+
+
+def estimate_percent(raw: int, min_dv: int, max_dv: int) -> int:
+    if max_dv <= min_dv:
+        return 0
+    pct = int(round((raw - min_dv) * 100.0 / (max_dv - min_dv)))
+    return max(0, min(100, pct))
+
+
+def extract_battery1_level(payload: bytes, raw_deci_volt: int) -> Optional[int]:
+    if len(payload) < 4:
+        return None
+
+    raw2 = raw_deci_volt.to_bytes(2, "little", signed=False)
+    candidates: list[int] = []
+
+    for i in range(0, len(payload) - 1):
+        if payload[i : i + 2] != raw2:
+            continue
+        if i >= 2:
+            lv1 = payload[i - 2]
+            lv2 = payload[i - 1]
+            if 0 <= lv1 <= 100 and 0 <= lv2 <= 100:
+                candidates.append(lv1)
+        if i >= 1:
+            lv = payload[i - 1]
+            if 0 <= lv <= 100:
+                candidates.append(lv)
+
+    if not candidates:
+        return None
+
+    counts: Dict[int, int] = {}
+    for v in candidates:
+        counts[v] = counts.get(v, 0) + 1
+    return max(counts, key=lambda x: counts[x])
 
 
 def build_frame(cmd: int, typ: int, addr: int, payload: bytes) -> bytes:
@@ -120,9 +182,7 @@ def choose_profile(services) -> str:
     return "unknown"
 
 
-async def find_target(
-    name: Optional[str], address: Optional[str], timeout: float = 8.0
-):
+async def find_target(name: Optional[str], address: Optional[str], timeout: float = 8.0):
     if address:
         d = await BleakScanner.find_device_by_address(address, timeout=timeout)
         return d
@@ -450,9 +510,9 @@ async def joystick(request: JoystickRequest, background_tasks: BackgroundTasks):
                 await tx(read_cmd2(0xBB, 0x02))
                 await tx(read_cmd2(0x7D, 0x02))
 
-                payload = request.x.to_bytes(
+                payload = request.x.to_bytes(2, "little", signed=True) + request.y.to_bytes(
                     2, "little", signed=True
-                ) + request.y.to_bytes(2, "little", signed=True)
+                )
 
                 t_end = time.monotonic() + max(0.2, request.duration)
                 next_drive = time.monotonic()
@@ -613,6 +673,118 @@ async def list_registers():
     return JSONResponse(
         content={
             "registers": {k: hex(v) for k, v in REG.items()},
+        }
+    )
+
+
+@app.get("/api/battery")
+async def read_battery(
+    xor_key: str = "55",
+    tries: int = 4,
+    interval: float = 0.15,
+    timeout: float = 4.0,
+    min_dv: int = 195,
+    max_dv: int = 252,
+):
+    if xor_key not in ("none", "55", "d8"):
+        raise HTTPException(status_code=400, detail="xor_key must be none/55/d8")
+    if tries < 1:
+        raise HTTPException(status_code=400, detail="tries must be >= 1")
+    if interval < 0:
+        raise HTTPException(status_code=400, detail="interval must be >= 0")
+    if timeout <= 0:
+        raise HTTPException(status_code=400, detail="timeout must be > 0")
+
+    async with robot_lock:
+        client = await get_client()
+        profile = choose_profile(client.services)
+        if profile == "nus":
+            write_uuid = CHR_WRITE_NUS
+            notify_uuid = CHR_NOTIFY_NUS
+        elif profile == "ffe":
+            write_uuid = CHR_FFE
+            notify_uuid = CHR_FFE
+        else:
+            raise HTTPException(status_code=500, detail="Unknown BLE profile")
+
+        got = asyncio.Event()
+        result: dict[str, Any] = {
+            "raw": None,
+            "mode": "unknown",
+            "telemetry_payload": None,
+            "telemetry_mode": "unknown",
+        }
+
+        def on_notify(_, data: bytearray):
+            parsed = decode_frame_any(bytes(data))
+            if not parsed:
+                return
+            cmd, typ, addr, payload, mode = parsed
+            if cmd == 0x0D and typ == 0x01 and addr == 0xBB and len(payload) >= 2:
+                result["raw"] = int.from_bytes(payload[:2], "little", signed=False)
+                result["mode"] = mode
+                got.set()
+            elif cmd == 0x0D and typ == 0x01 and addr == 0x1F and len(payload) >= 4:
+                result["telemetry_payload"] = bytes(payload)
+                result["telemetry_mode"] = mode
+
+        await client.start_notify(notify_uuid, on_notify)
+        try:
+            frame = read_cmd2(0xBB, 0x02)
+            telemetry_frame = read_cmd2(0x1F, 0x10)
+            wire = maybe_xor(frame, xor_key)
+            telemetry_wire = maybe_xor(telemetry_frame, xor_key)
+            for _ in range(tries):
+                await client.write_gatt_char(write_uuid, telemetry_wire, response=False)
+                await asyncio.sleep(interval)
+                await client.write_gatt_char(write_uuid, wire, response=False)
+                await asyncio.sleep(interval)
+
+            try:
+                await asyncio.wait_for(got.wait(), timeout=timeout)
+            except asyncio.TimeoutError as exc:
+                raise HTTPException(
+                    status_code=504,
+                    detail="No battery response received",
+                ) from exc
+        finally:
+            await client.stop_notify(notify_uuid)
+
+    raw = result["raw"]
+    volts = raw / 10.0
+    pct_est = estimate_percent(raw, min_dv, max_dv)
+
+    payload_1f = result.get("telemetry_payload")
+    pct_level = None
+    if payload_1f:
+        pct_level = extract_battery1_level(payload_1f, raw)
+
+    if pct_level is not None:
+        pct = pct_level
+        pct_source = "battery1Level(0x1F)"
+    else:
+        pct = pct_est
+        pct_source = "voltage_estimate(0xBB)"
+
+    robot_state["last_command"] = "battery:read"
+    robot_state["last_response"] = (
+        f"battery={pct}% [{pct_source}] ({volts:.1f}V, raw={raw}, decode={result['mode']})"
+    )
+
+    return JSONResponse(
+        content={
+            "status": "ok",
+            "raw_deci_volt": raw,
+            "voltage": round(volts, 2),
+            "battery_percent": pct,
+            "battery_percent_source": pct_source,
+            "battery_percent_estimate": pct_est,
+            "battery1_level": pct_level,
+            "range_deci_volt": {"min": min_dv, "max": max_dv},
+            "range_volt": {"min": round(min_dv / 10.0, 2), "max": round(max_dv / 10.0, 2)},
+            "rx_decode_mode": result["mode"],
+            "telemetry_decode_mode": result.get("telemetry_mode", "unknown"),
+            "request_xor_key": xor_key,
         }
     )
 

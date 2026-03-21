@@ -83,6 +83,20 @@ poetry run minirobot-ble --address CB:F4:C1:BF:F4:79 move right --duration 1.0
 poetry run minirobot-ble --address CB:F4:C1:BF:F4:79 move stop --duration 0.4
 ```
 
+## Battery Check (CLI)
+
+```bash
+python minirobot_battery_read.py \
+  --address CB:F4:C1:BF:F4:79 \
+  --xor-key 55 \
+  --min-dv 195 \
+  --max-dv 252
+```
+
+Output will include raw deci-volt value (`0xBB`), voltage (V), and estimated battery percent.
+
+On Web API (`/api/battery`), battery percent now prefers telemetry `battery1Level` from `0x1F` (app-like), with automatic fallback to voltage estimate from `0xBB`.
+
 ## Web API Endpoints
 
 | Method | Endpoint | Description |
@@ -95,8 +109,15 @@ poetry run minirobot-ble --address CB:F4:C1:BF:F4:79 move stop --duration 0.4
 | POST | `/api/light` | Light control |
 | POST | `/api/write` | Register write |
 | POST | `/api/raw` | Raw hex command |
+| GET | `/api/battery` | Read battery (0xBB) |
 | GET | `/api/status` | Connection status |
 | GET | `/api/registers` | Register list |
+
+Battery API example:
+
+```bash
+curl "http://localhost:8000/api/battery?xor_key=55&min_dv=195&max_dv=252"
+```
 
 See `API_DOCUMENTATION.md` for full API documentation.
 

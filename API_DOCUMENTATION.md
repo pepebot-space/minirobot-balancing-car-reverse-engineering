@@ -393,6 +393,55 @@ Daftar semua register.
 
 ---
 
+### 12. GET /api/battery
+
+Baca status baterai dari register `0xBB` pada robot yang sudah terkoneksi.
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| xor_key | string | "55" | XOR key: "none", "55", "d8" |
+| tries | int | 4 | Jumlah kirim request read |
+| interval | float | 0.15 | Jeda antar request (detik) |
+| timeout | float | 4.0 | Timeout tunggu notifikasi (detik) |
+| min_dv | int | 195 | Tegangan 0% baterai (deci-volt) |
+| max_dv | int | 252 | Tegangan 100% baterai (deci-volt) |
+
+**Response:**
+```json
+{
+  "status": "ok",
+  "raw_deci_volt": 233,
+  "voltage": 23.3,
+  "battery_percent": 67,
+  "battery_percent_source": "battery1Level(0x1F)",
+  "battery_percent_estimate": 65,
+  "battery1_level": 67,
+  "range_deci_volt": {
+    "min": 195,
+    "max": 252
+  },
+  "range_volt": {
+    "min": 19.5,
+    "max": 25.2
+  },
+  "rx_decode_mode": "55",
+  "telemetry_decode_mode": "55",
+  "request_xor_key": "55"
+}
+```
+
+`battery_percent` akan memakai `battery1Level` dari telemetry `0x1F` jika bisa dideteksi; jika tidak, fallback ke estimasi linear dari `0xBB`.
+
+**Error Codes:**
+- `400` - Query parameter tidak valid
+- `500` - Unknown BLE profile
+- `503` - Robot not connected
+- `504` - Tidak ada respons battery dari robot
+
+---
+
 ## Error Responses
 
 **Standard Error Format:**
@@ -480,6 +529,9 @@ curl -X POST http://localhost:8000/api/write \
 curl -X POST http://localhost:8000/api/raw \
   -H "Content-Type: application/json" \
   -d '{"hex": "55AA040A037201007BFF"}'
+
+# Read battery (0xBB)
+curl "http://localhost:8000/api/battery?xor_key=55&min_dv=195&max_dv=252"
 
 # Disconnect
 curl -X POST http://localhost:8000/api/disconnect

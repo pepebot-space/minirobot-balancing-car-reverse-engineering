@@ -79,6 +79,49 @@
             </div>
         </div>
 
+        <!-- Battery Panel -->
+        <div class="bg-gray-800 rounded-lg p-4 mb-6">
+            <div class="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
+                <div>
+                    <h2 class="text-lg font-semibold text-blue-300">Battery Check</h2>
+                    <p class="text-sm text-gray-400">Read battery from register 0xBB</p>
+                </div>
+                <div class="grid grid-cols-2 md:grid-cols-5 gap-2 w-full md:w-auto">
+                    <input type="text" id="batteryXorKey" value="55" placeholder="xor"
+                        class="bg-gray-700 border border-gray-600 rounded px-2 py-2 text-sm text-white">
+                    <input type="number" id="batteryMinDv" value="195" min="1"
+                        class="bg-gray-700 border border-gray-600 rounded px-2 py-2 text-sm text-white">
+                    <input type="number" id="batteryMaxDv" value="252" min="1"
+                        class="bg-gray-700 border border-gray-600 rounded px-2 py-2 text-sm text-white">
+                    <button onclick="readBattery()" class="btn-control bg-emerald-600 hover:bg-emerald-700 px-3 py-2 rounded text-sm">
+                        Read Battery
+                    </button>
+                </div>
+            </div>
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4">
+                <div class="bg-gray-900 rounded p-3">
+                    <div class="text-xs text-gray-400">Battery</div>
+                    <div id="batteryPercent" class="text-xl font-bold text-emerald-400">-</div>
+                </div>
+                <div class="bg-gray-900 rounded p-3">
+                    <div class="text-xs text-gray-400">Voltage</div>
+                    <div id="batteryVoltage" class="text-xl font-bold text-cyan-300">-</div>
+                </div>
+                <div class="bg-gray-900 rounded p-3">
+                    <div class="text-xs text-gray-400">Raw (deci-volt)</div>
+                    <div id="batteryRaw" class="text-xl font-bold text-gray-200">-</div>
+                </div>
+                <div class="bg-gray-900 rounded p-3">
+                    <div class="text-xs text-gray-400">Decode Mode</div>
+                    <div id="batteryDecode" class="text-xl font-bold text-gray-200">-</div>
+                </div>
+                <div class="bg-gray-900 rounded p-3 col-span-2 md:col-span-4">
+                    <div class="text-xs text-gray-400">Percent Source</div>
+                    <div id="batterySource" class="text-base font-semibold text-amber-300">-</div>
+                </div>
+            </div>
+        </div>
+
         <!-- Movement Controls -->
         <div class="bg-gray-800 rounded-lg p-4 mb-6">
             <h2 class="text-lg font-semibold mb-4 text-blue-300">Movement Control</h2>
@@ -417,6 +460,7 @@
                 const result = await api('/connect', 'POST', { address });
                 updateConnectionUI(true, result.name, result.address);
                 log(`Connected to ${result.name}`, 'success');
+                readBattery();
             } catch (e) {
                 log('Connection failed: ' + e.message, 'error');
             }
@@ -528,6 +572,34 @@
                 log(`Sent raw: ${hex}`, 'success');
             } catch (e) {
                 log('Raw send failed: ' + e.message, 'error');
+            }
+        }
+
+        async function readBattery() {
+            if (!isConnected) {
+                log('Not connected', 'error');
+                return;
+            }
+
+            const xorKey = document.getElementById('batteryXorKey').value.trim() || '55';
+            const minDv = parseInt(document.getElementById('batteryMinDv').value, 10);
+            const maxDv = parseInt(document.getElementById('batteryMaxDv').value, 10);
+            const query = new URLSearchParams({
+                xor_key: xorKey,
+                min_dv: Number.isNaN(minDv) ? 195 : String(minDv),
+                max_dv: Number.isNaN(maxDv) ? 252 : String(maxDv)
+            });
+
+            try {
+                const result = await api(`/battery?${query.toString()}`);
+                document.getElementById('batteryPercent').textContent = `${result.battery_percent}%`;
+                document.getElementById('batteryVoltage').textContent = `${result.voltage} V`;
+                document.getElementById('batteryRaw').textContent = `${result.raw_deci_volt}`;
+                document.getElementById('batteryDecode').textContent = result.rx_decode_mode || '-';
+                document.getElementById('batterySource').textContent = result.battery_percent_source || '-';
+                log(`Battery: ${result.battery_percent}% [${result.battery_percent_source}] (${result.voltage}V, raw=${result.raw_deci_volt})`, 'success');
+            } catch (e) {
+                log('Battery read failed: ' + e.message, 'error');
             }
         }
 
